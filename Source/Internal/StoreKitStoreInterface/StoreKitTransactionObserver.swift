@@ -20,6 +20,12 @@ internal final class StoreKitTransactionObserver : NSObject {
 }
 
 extension StoreKitTransactionObserver {
+    
+    fileprivate func handlePurchasing(for transaction: SKPaymentTransaction, on paymentQueue: SKPaymentQueue) {
+        self.delegate?.storeInterface(self.storeInterface, beginPurchaseProductWith: transaction.payment.productIdentifier, completion: {
+            
+        })
+    }
     fileprivate func completePurchase(for transaction: SKPaymentTransaction, on paymentQueue: SKPaymentQueue) {
         self.delegate?.storeInterface(self.storeInterface, didPurchaseProductWith: transaction.payment.productIdentifier, completion: {
             paymentQueue.finishTransaction(transaction)

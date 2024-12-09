@@ -4,7 +4,7 @@ import StoreKit
 public protocol ProductInterfaceControllerDelegate : AnyObject {
     func productInterfaceControllerDidChangeFetchingState(_ controller: ProductInterfaceController)
     
-    func productInterfaceController(_ controller: ProductInterfaceController, didChangeStatesFor products: Set<MerchantKit.Product>)
+    func productInterfaceController(_ controller: ProductInterfaceController, didChangeStatesFor products: Set<Product>)
     func productInterfaceController(_ controller: ProductInterfaceController, didCommit purchase: Purchase, with result: ProductInterfaceController.CommitPurchaseResult)
     func productInterfaceController(_ controller: ProductInterfaceController, didRestorePurchasesWith result: ProductInterfaceController.RestorePurchasesResult)
 }
@@ -12,7 +12,7 @@ public protocol ProductInterfaceControllerDelegate : AnyObject {
 /// This controller is actively being worked on and the API surface is considered volatile.
 /// This controller manages the purchased state of the supplied `products`. This controller is a convenience wrapper around several `Merchant` tasks and is intended to be used to display a user interface, like a storefront.
 ///
-/// Create a controller and call `fetchDataIfNecessary()` when the user interface is presented. Update UI in response to state changes, via the `delegate`. Delegate methods are invoked on the main queue.
+/// Create a controller and call `fetchDataIfNecessary()` when the user interface is presented. Update UI in response to state changes, via the `delegate`.
 ///
 /// If the user decides to purchase a displayed product, use the `commit(_:)` method to begin a purchase flow. Alternatively, call `restorePurchases()` if the user wants to restore an earlier transaction.
 
@@ -45,8 +45,8 @@ public final class ProductInterfaceController {
     private let merchant: Merchant
     
     private var availablePurchasesTask: AvailablePurchasesTask?
-    private var commitPurchaseTask: CommitPurchaseTask?
-    private var restorePurchasesTask: RestorePurchasesTask?
+    public var commitPurchaseTask: CommitPurchaseTask?
+    public var restorePurchasesTask: RestorePurchasesTask?
     
     private var availablePurchasesFetchResult: FetchResult?
     
@@ -95,45 +95,47 @@ public final class ProductInterfaceController {
     }
     
     /// Purchase a `Product` managed by this controller.
-    public func commit(_ purchase: Purchase, applying discount: PurchaseDiscount? = nil) {
+    public func commit(_ purchase: Purchase) {
         guard let product = self.products.first(where: { product in
             product.identifier == purchase.productIdentifier
         }) else { MerchantKitFatalError.raise("The `Purchase` cannot be committed to this `ProductInterfaceController` instance as it is not vended by it. This indicates a logic error in your application.") }
         
-        let task = self.merchant.commitPurchaseTask(for: purchase, applying: discount)
+        let task = self.merchant.commitPurchaseTask(for: purchase)
         task.onCompletion = { result in
             self.commitPurchaseTask = nil
             
-            DispatchQueue.main.async {
-                self.didChangeState(for: [product])
-                
-                switch result {
-                    case .success(_):
+            self.didChangeState(for: [product])
+            
+            switch result {
+                case .success(_):
+                    DispatchQueue.main.async {
                         self.delegate?.productInterfaceController(self, didCommit: purchase, with: .success)
-                    case .failure(let baseError):
-                        let error: CommitPurchaseError
-                        
-                        let underlyingError = (baseError as NSError).userInfo[NSUnderlyingErrorKey] as? Error
-                        
-                        switch (baseError, underlyingError) {
-                            case (SKError.paymentCancelled, _):
-                                error = .userCancelled
-                            #if os(iOS)
-                            case (SKError.storeProductNotAvailable, _):
-                                error = .purchaseNotAvailable
-                            #endif
-                            case (SKError.paymentInvalid, _):
-                                error = .paymentInvalid
-                            case (SKError.paymentNotAllowed, _):
-                                error = .paymentNotAllowed
-                            case (let networkError as URLError, _), (_, let networkError as URLError):
-                                error = .networkError(networkError)
-                            default:
-                                error = .genericProblem(baseError)
-                        }
-
+                    }
+                case .failure(let baseError):
+                    let error: CommitPurchaseError
+                    
+                    let underlyingError = (baseError as NSError).userInfo[NSUnderlyingErrorKey] as? Error
+                    
+                    switch (baseError, underlyingError) {
+                        case (SKError.paymentCancelled, _):
+                            error = .userCancelled
+                        #if os(iOS)
+                        case (SKError.storeProductNotAvailable, _):
+                            error = .purchaseNotAvailable
+                        #endif
+                        case (SKError.paymentInvalid, _):
+                            error = .paymentInvalid
+                        case (SKError.paymentNotAllowed, _):
+                            error = .paymentNotAllowed
+                        case (let networkError as URLError, _), (_, let networkError as URLError):
+                            error = .networkError(networkError)
+                        default:
+                            error = .genericProblem(baseError)
+                    }
+                    
+                    DispatchQueue.main.async {
                         self.delegate?.productInterfaceController(self, didCommit: purchase, with: .failure(error))
-                }
+                    }
             }
         }
         
@@ -202,8 +204,7 @@ extension ProductInterfaceController {
         public enum FailureReason {
             case networkFailure(URLError)
             case storeKitFailure(SKError)
-            case genericProblem(Error)
-			case userNotAllowedToMakePurchases
+            case genericProblem
         }
     }
     
@@ -249,18 +250,12 @@ extension ProductInterfaceController {
                     let underlyingError = (error as NSError).userInfo[NSUnderlyingErrorKey] as? Error
                     
                     switch (error, underlyingError) {
-						case (AvailablePurchasesFetcherError.userNotAllowedToMakePurchases, _):
-							failureReason = .userNotAllowedToMakePurchases
                         case (let networkError as URLError, _), (_, let networkError as URLError):
                             failureReason = .networkFailure(networkError)
-                        case (let skError as SKError, _):
-                            failureReason = .storeKitFailure(skError)
-						case (_, let skError as SKError):
-							failureReason = .storeKitFailure(skError)
-						case (AvailablePurchasesFetcherError.other(let error), _):
-							failureReason = .genericProblem(error)
+                        case (let error as SKError, _):
+                            failureReason = .storeKitFailure(error)
                         default:
-                            failureReason = .genericProblem(error)
+                            failureReason = .genericProblem
                     }
                     
                     loadResult = .failed(failureReason)

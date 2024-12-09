@@ -1,5 +1,3 @@
-import Foundation
-
 /// This task restores previous purchases made by the signed-in user. Executing this task may present UI.
 /// If using MerchantKit, it is important to use this task rather than manually invoking StoreKit.
 public final class RestorePurchasesTask : MerchantTask {
@@ -33,7 +31,12 @@ public final class RestorePurchasesTask : MerchantTask {
 }
 
 extension RestorePurchasesTask {
-    private func finish(with result: Result<RestoredProducts, Error>) {
+    public func finish(with result: Result<RestoredProducts, Error>) {
+        
+        guard self.onCompletion != nil else{
+            
+            return
+        }
         self.onCompletion?(result)
         
         self.merchant.storePurchaseObservers.remove(self, forObserving: \.restorePurchasedProducts)
